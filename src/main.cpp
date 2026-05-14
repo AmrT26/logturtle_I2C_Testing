@@ -1,127 +1,344 @@
 #include <Arduino.h>
-#include <Wire.h>
 
 // ============================================
-// LOGTURTLE - I2C Controller
+// LOGTURTLE - I2C
+// Comparator only on SDA 
+// SDA inverted, SCL normal
 // ============================================
 
-byte current_address = 0x40; // Default I2C address of the chip
-byte current_reg     = 0x00; // Default register index
-byte current_data    = 0xAB; // Default data
+const int SDA_PIN = 18;
+const int SCL_PIN = 19;
+const int HALF_PERIOD_US = 250; // 2kHz
 
+byte current_address = 0x40;
+byte current_reg     = 0x00;
+byte current_data    = 0xAB;
 
-// IOMUX CONFIGURATION
+// ============================================
+// IOMUX
+// ============================================
 
 void config_pins_iomux() {
-
-  // SDA Pin 18 → Push-Pull
-  // Clear bit 11 (ODE = Open Drain Enable)
-  // ODE = 0 → Push-Pull
+  // SDA Pin 18 → Push-Pull (ODE=0)
   IOMUXC_SW_PAD_CTL_PAD_GPIO_AD_B1_01 &= ~(1 << 11);
-  Serial.println("SDA Pin 18 → Push-Pull (IOMUX ODE=0)");
-
-  // SCL Pin 19 → Open-Drain
-  // Set bit 11 (ODE = Open Drain Enable)
-  // ODE = 1 → Open-Drain
-  IOMUXC_SW_PAD_CTL_PAD_GPIO_AD_B1_00 |= (1 << 11);
-  Serial.println("SCL Pin 19 → Open-Drain (IOMUX ODE=1)");
+  // SCL Pin 19 → Open-Drain (ODE=1)
+  IOMUXC_SW_PAD_CTL_PAD_GPIO_AD_B1_00 |=  (1 << 11);
 }
 
+// ============================================
+// SDA — INVERTED (comparator on SDA)
+// ============================================
 
-// Write a register (address, register index, data)
+void sda_high() {
+  // We want the chip to see HIGH
+  // Inverted comparator
+  // → We send LOW to the comparator
+  pinMode(SDA_PIN, OUTPUT);
+  digitalWrite(SDA_PIN, LOW);
+}
 
-void i2c_write_register(byte device_address, byte reg_index, byte data) {
-  Serial.println("==============================");
-  Serial.print("Address : 0x"); Serial.println(device_address, HEX);
-  Serial.print("Register: 0x"); Serial.println(reg_index, HEX);
-  Serial.print("Data    : 0x"); Serial.print(data, HEX);
-  Serial.print(" (0b");        Serial.print(data, BIN);
+void sda_low() {
+  // We want the chip to see LOW
+  // Inverted comparator
+  // → We send HIGH to the comparator
+  // → We release the pin (pull-up → HIGH)
+  pinMode(SDA_PIN, INPUT);
+}
+
+int read_sda() {
+  // The chip sends a bit on SDA
+  // The comparator inverts it before we read it
+  // → We invert what we read
+  pinMode(SDA_PIN, INPUT);
+  int raw = digitalRead(SDA_PIN);
+  return 1 - raw; // compensation inversion
+}
+
+// ============================================
+// SCL — NORMAL
+// ============================================
+
+void scl_high() {
+  pinMode(SCL_PIN, INPUT);
+  delayMicroseconds(HALF_PERIOD_US);
+}
+
+void scl_low() {
+  pinMode(SCL_PIN, OUTPUT);
+  digitalWrite(SCL_PIN, LOW);
+  delayMicroseconds(HALF_PERIOD_US);
+}
+
+// ============================================
+// START
+// SDA falls while SCL HIGH
+// With SDA inversion:
+// → sda_low() makes SDA go high on chip side
+// → sda_high() makes SDA go low on chip side
+// ============================================
+
+void i2c_start() {
+  // Idle state: SDA HIGH, SCL HIGH
+  sda_high(); // chip sees HIGH
+  scl_high(); // normal
+  delayMicroseconds(HALF_PERIOD_US);
+
+  // START: SDA falls while SCL HIGH
+  sda_low();  // chip sees LOW = START
+  delayMicroseconds(HALF_PERIOD_US);
+
+  scl_low();  // SCL falls after SDA
+  delayMicroseconds(HALF_PERIOD_US);
+
+  Serial.println("START");
+}
+
+// ============================================
+// STOP
+// SDA rises while SCL HIGH
+// ============================================
+
+void i2c_stop() {
+  sda_low();  // chip sees LOW
+  scl_high(); // SCL rises
+  delayMicroseconds(HALF_PERIOD_US);
+
+  sda_high(); // chip voit HIGH = STOP
+  delayMicroseconds(HALF_PERIOD_US);
+
+  Serial.println("STOP");
+}
+
+// ============================================
+// WRITE A BIT
+// SCL normal, SDA inverted
+// ============================================
+
+void i2c_write_bit(int bit) {
+  // SCL low → prepare SDA
+  scl_low();
+
+  // Set SDA according to the desired bit
+  // The sda_high/low functions handle
+  // the inversion automatically
+  if(bit) {
+    sda_high(); // chip voit 1 
+  } else {
+    sda_low();  // chip voit 0 
+  }
+
+  delayMicroseconds(HALF_PERIOD_US);
+
+  // SCL high → chip reads SDA
+  scl_high();
+
+  // SCL low → end of the bit
+  scl_low();
+}
+
+// ============================================
+// READ A BIT (ACK/NACK)
+// ============================================
+
+int i2c_read_bit() {
+  scl_low();
+  sda_high(); // release SDA (chip can write)
+  delayMicroseconds(HALF_PERIOD_US);
+
+  scl_high(); // chip writes on SDA
+
+  // read_sda() handles the inversion
+  int bit = read_sda(); 
+
+  scl_low();
+  return bit;
+}
+
+// ============================================
+// WRITE A BYTE
+// ============================================
+
+void i2c_write_byte(byte data) {
+  Serial.print("  TX: 0x");
+  Serial.print(data, HEX);
+  Serial.print(" (0b");
+  Serial.print(data, BIN);
   Serial.println(")");
+
+  for(int i = 7; i >= 0; i--) {
+    int bit = (data >> i) & 0x01;
+    i2c_write_bit(bit);
+  }
+}
+
+// ============================================
+// READ A BYTE
+// ============================================
+
+byte i2c_read_byte() {
+  byte data = 0;
+  for(int i = 7; i >= 0; i--) {
+    int bit = i2c_read_bit();
+    data |= (bit << i);
+  }
+  return data;
+}
+
+// ============================================
+// ACK / NACK
+// ============================================
+
+bool i2c_read_ack() {
+  int ack = i2c_read_bit();
+  if(ack == 0) {
+    Serial.println("  → ACK");
+    return true;
+  } else {
+    Serial.println("  → NACK");
+    return false;
+  }
+}
+
+void i2c_send_nack() {
+  i2c_write_bit(1); // NACK = 1
+}
+
+// ============================================
+// WRITE REGISTER
+// START | addr+W | reg | data | STOP
+// ============================================
+
+void i2c_write_register(byte address,
+                        byte reg,
+                        byte data) {
+  Serial.println("==============================");
+  Serial.println(" WRITE");
+  Serial.print  (" Addr: 0x"); Serial.println(address, HEX);
+  Serial.print  (" Reg : 0x"); Serial.println(reg, HEX);
+  Serial.print  (" Data: 0x"); Serial.println(data, HEX);
   Serial.println("------------------------------");
 
-  Wire.beginTransmission(device_address);
-  Wire.write(reg_index);
-  Wire.write(data);
-  byte error = Wire.endTransmission();
+  i2c_start();
 
-  switch(error) {
-    case 0:
-      Serial.println("→ ACK");
-      break;
-    case 2:
-      Serial.println("→ NACK on address");
-      break;
-    case 3:
-      Serial.println("→ NACK on data");
-      break;
-    default:
-      Serial.print("→ Error: ");
-      Serial.println(error);
-  }
-  Serial.println("==============================");
-}
+  // Adresse + W=0
+  byte addr_w = (address << 1) | 0x00;
+  Serial.print(" addr+W: 0x");
+  Serial.println(addr_w, HEX);
+  i2c_write_byte(addr_w);
+  bool ack1 = i2c_read_ack();
 
-
-//Read a register
-
-void i2c_read_register(byte device_address, byte reg_index) {
-  Serial.println("==============================");
-  Serial.print("Reading Reg: 0x"); Serial.println(reg_index, HEX);
-
-  // 1. First phase : sending the register index
-  // We start a transmission but we don't send a STOP at the end
-  Wire.beginTransmission(device_address);
-  Wire.write(reg_index);
-  
-  // The 'false' generates a RESTART instead of a STOP
-  byte error = Wire.endTransmission(false); 
-
-  if (error != 0) {
-    Serial.println("Error: Device not found or NACK");
+  if(!ack1) {
+    Serial.println(" Failed at address !");
+    i2c_stop();
     return;
   }
 
-  // 2. Second phase : Request the data (Read)
-  // requestFrom generates the RESTART followed by the address in read mode
-  Wire.requestFrom(device_address, (uint8_t)1);
+  // Register
+  i2c_write_byte(reg);
+  bool ack2 = i2c_read_ack();
 
-  if (Wire.available()) {
-    byte data = Wire.read();
-    Serial.print("Data read  : 0x"); Serial.print(data, HEX);
-    Serial.print(" (0b");          Serial.print(data, BIN);
-    Serial.println(")");
+  if(!ack2) {
+    Serial.println(" Failed at register !");
+    i2c_stop();
+    return;
   }
+
+  // Data
+  i2c_write_byte(data);
+  i2c_read_ack();
+
+  i2c_stop();
   Serial.println("==============================");
 }
 
-// Scan I2C bus
+// ============================================
+// READ REGISTER
+// START|addr+W|reg|RESTART|addr+R|data|STOP
+// ============================================
+
+void i2c_read_register(byte address, byte reg) {
+  Serial.println("==============================");
+  Serial.println(" READ");
+  Serial.print  (" Addr: 0x"); Serial.println(address, HEX);
+  Serial.print  (" Reg : 0x"); Serial.println(reg, HEX);
+  Serial.println("------------------------------");
+
+  // Phase 1 : Write register index
+  i2c_start();
+
+  byte addr_w = (address << 1) | 0x00;
+  i2c_write_byte(addr_w);
+  bool ack1 = i2c_read_ack();
+
+  if(!ack1) {
+    Serial.println(" Failed at address !");
+    i2c_stop();
+    return;
+  }
+
+  i2c_write_byte(reg);
+  i2c_read_ack();
+
+  // Phase 2 : Read data
+  Serial.println(" RESTART");
+  i2c_start(); // RESTART
+
+  byte addr_r = (address << 1) | 0x01;
+  i2c_write_byte(addr_r);
+  bool ack2 = i2c_read_ack();
+
+  if(!ack2) {
+    Serial.println(" Failed at read address !");
+    i2c_stop();
+    return;
+  }
+
+  // Read the data
+  byte data = i2c_read_byte();
+  i2c_send_nack(); // tell the chip to stop
+
+  Serial.print(" Data: 0x");
+  Serial.print(data, HEX);
+  Serial.print(" (0b");
+  Serial.print(data, BIN);
+  Serial.println(")");
+
+  i2c_stop();
+  Serial.println("==============================");
+}
+
+// ============================================
+// SCAN BUS
+// ============================================
 
 void scanBus() {
   Serial.println("=== Scanning I2C bus ===");
   int found = 0;
-
+  // Iterate all possible I2C addresses (1 to 126)
   for(byte addr = 1; addr < 127; addr++) {
-    Wire.beginTransmission(addr);
-    byte error = Wire.endTransmission();
+    i2c_start();                      // Start of I2C frame
+    byte addr_w = (addr << 1) | 0x00; // Address + R/W bit = 0 (write)
+    i2c_write_byte(addr_w);           // Send the address on the bus
+    bool ack = i2c_read_ack();        // Check if a device responded ACK
+    i2c_stop();                       // End of the I2C frame
 
-    if(error == 0) {
+    if(ack) {
       Serial.print("  Found: 0x");
-      if(addr < 16){
-        Serial.print("0"); Serial.println(addr, HEX);
-        found++; 
-      }
+      if(addr < 16) Serial.print("0");// Add a leading 0 for neat display
+      Serial.println(addr, HEX);      // Display the found device address in hex
+      found++;
     }
   }
 
   if(found == 0) {
-    Serial.println("  No devices found");
+    Serial.println("  No devices found"); // No device found on the bus
   }
   Serial.println("========================");
 }
 
-
-// hexadecimal number parsing
-
+// ============================================
+// PARSE HEX
+// ============================================
 
 byte parseHex(String str) {
   str.trim();
@@ -131,64 +348,61 @@ byte parseHex(String str) {
   return (byte)strtol(str.c_str(), NULL, 16);
 }
 
-
-// Menu
+// ============================================
+// MENU
+// ============================================
 
 void printMenu() {
   Serial.println("==============================");
-  Serial.println(" I2C Controller - Teensy 4.1");
-  Serial.println(" SDA Pin18 PP | SCL Pin19 OD");
+  Serial.println(" LOGTURTLE I2C Controller");
+  Serial.println(" SDA inverted (comparator)");
+  Serial.println(" SCL normal");
   Serial.println(" Clock : 2kHz");
   Serial.println("==============================");
   Serial.print  (" Address : 0x");
   Serial.println(current_address, HEX);
-  Serial.print(" Register: 0x");
+  Serial.print  (" Register: 0x");
   Serial.println(current_reg, HEX);
   Serial.print  (" Data    : 0x");
   Serial.println(current_data, HEX);
   Serial.println("------------------------------");
   Serial.println(" Commands:");
-  Serial.println("   a 0x40 → Send target Address");
-  Serial.println("   r 0x05 → Read Register (ex: 5)");
-  Serial.println("   w 0xFE → Write current data to current Reg");
-  Serial.println("   d 0xAB → Set data value to write");
-  Serial.println("   i 0x00 → Set register index");
+  Serial.println("   a 0x40 → Set address");
+  Serial.println("   i 0x00 → Set register");
+  Serial.println("   d 0xAB → Set data");
+  Serial.println("   w      → Write register");
+  Serial.println("   r      → Read register");
   Serial.println("   s      → Scan bus");
   Serial.println("   h      → Help");
   Serial.println("==============================");
 }
 
-
+// ============================================
 // SETUP
-
+// ============================================
 
 void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // 1. Initialising Wire.h
-  Wire.begin();
-
-  // 2. Configuring IOMUX to configure the pins as open-drain or push-pull
   config_pins_iomux();
 
-  // 3. Clock at 2kHz
-  Wire.setClock(2000);
+  // IDLE: SDA HIGH, SCL HIGH
+  sda_high();
+  scl_high();
 
   Serial.println("==============================");
-  Serial.println(" Pin Configuration:");
-  Serial.println("   Wire.begin()     → OK");
-  Serial.println("   IOMUX SDA PP     → OK");
-  Serial.println("   IOMUX SCL OD     → OK");
-  Serial.print  ("   Clock 2kHz       → OK");
+  Serial.println(" Init OK");
+  Serial.println(" SDA : inverted (comparator)");
+  Serial.println(" SCL : normal");
   Serial.println("==============================");
 
   printMenu();
 }
 
-
+// ============================================
 // LOOP
-
+// ============================================
 
 void loop() {
   if(Serial.available()) {
@@ -207,7 +421,7 @@ void loop() {
           Serial.print("Address → 0x");
           Serial.println(current_address, HEX);
         } else {
-          Serial.println("Usage: a 0x71");   //shows the syntax to set the address
+          Serial.println("Usage: a 0x40");
         }
         break;
 
@@ -217,7 +431,7 @@ void loop() {
           Serial.print("Register → 0x");
           Serial.println(current_reg, HEX);
         } else {
-          Serial.println("Usage: i 0x05");   //shows the syntax to set the register index
+          Serial.println("Usage: i 0x00");
         }
         break;
 
@@ -230,22 +444,25 @@ void loop() {
           Serial.print(current_data, BIN);
           Serial.println(")");
         } else {
-          Serial.println("Usage: d 0xAB");  //shows the syntax to set the data
+          Serial.println("Usage: d 0xAB");
         }
-        break;
-      
-      case 'r': //Reading a register
-        if(param.length() > 0){
-          current_reg = parseHex(param);
-        }
-        i2c_read_register(current_address, current_reg);
         break;
 
-      case 'w': //Writing to a register
-        if(param.length() > 0){
+      case 'w':
+        if(param.length() > 0) {
           current_data = parseHex(param);
         }
-        i2c_write_register(current_address, current_reg, current_data);
+        i2c_write_register(current_address,
+                           current_reg,
+                           current_data);
+        break;
+
+      case 'r':
+        if(param.length() > 0) {
+          current_reg = parseHex(param);
+        }
+        i2c_read_register(current_address,
+                          current_reg);
         break;
 
       case 's':

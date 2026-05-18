@@ -65,6 +65,12 @@ void scl_high() {
   delayMicroseconds(HALF_PERIOD_US);
 }
 
+// New version of scl_high() without delay
+void scl_high_no_delay() {
+  pinMode(SCL_PIN, INPUT);
+  // No delay here
+}
+
 void scl_low() {
   pinMode(SCL_PIN, OUTPUT);
   digitalWrite(SCL_PIN, LOW);
@@ -159,8 +165,8 @@ int i2c_read_bit() {
 */
 
 int read_adc() {
-  const int THRESHOLD_HIGH = 2000;
-  pinMode(ADC_PIN, INPUT);
+  const int THRESHOLD_HIGH = 520; // 10 bits resolution here
+  //pinMode(PIN_TEST, OUTPUT);
   digitalWrite(PIN_TEST, HIGH);
   int raw = analogRead(ADC_PIN);
   digitalWrite(PIN_TEST, LOW);
@@ -178,12 +184,16 @@ int read_adc() {
 int i2c_read_adc() {
   scl_low();
   sda_high(); // release SDA (chip can write)
-  delayMicroseconds(HALF_PERIOD_US);
+  delayMicroseconds(50); // Small delay for SDA to settle
 
-  scl_high(); // chip writes on SDA
+  scl_high_no_delay(); // chip writes on SDA (no internal delay)
+
+  delayMicroseconds(50); // Short delay for ACK to settle on SDA
 
   // read_sda() handles the inversion
   int bit = read_adc(); 
+
+  delayMicroseconds(HALF_PERIOD_US - 50); // Complete the full clock period
 
   scl_low();
   return bit;
@@ -266,7 +276,6 @@ void i2c_write_register(byte address,
   bool ack1 = i2c_read_ack();
 
   if(!ack1) {
-    Serial.print("  HIIIIIIIIIIIIII");
     Serial.println(" Failed at address !");
     i2c_stop();
     return;

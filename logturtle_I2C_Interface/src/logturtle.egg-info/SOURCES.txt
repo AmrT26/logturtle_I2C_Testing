@@ -1,0 +1,8 @@
+pyproject.toml
+src/logturtle/__init__.py.py
+src/logturtle/core.py
+src/logturtle.egg-info/PKG-INFO
+src/logturtle.egg-info/SOURCES.txt
+src/logturtle.egg-info/dependency_links.txt
+src/logturtle.egg-info/requires.txt
+src/logturtle.egg-info/top_level.txt

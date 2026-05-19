@@ -6,5 +6,7 @@ To launch the control interface on your machine:
 2. Install the package:
    `pip install -e .` (with the full stop)
 3. Launch the interface via a Python script:
+   
    from logturtle.core import main
+
    main()

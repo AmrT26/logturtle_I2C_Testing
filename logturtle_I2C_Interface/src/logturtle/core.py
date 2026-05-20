@@ -9,10 +9,42 @@ BAUD_RATE = 115200
 
 GITHUB_EXCEL_URL = "https://github.com/AmrT26/logturtle_I2C_Testing/blob/main/Reg%20Map.xlsx"
 
+COLOR_RED = "\033[91m"
+COLOR_RESET = "\033[0m"
+
 teensy = None
+verbose_mode = False
 
 history_registers = {}
 
+VALID_REGISTERS = list(range(0, 8)) + list(range(16, 29))
+
+DEFAULT_REG_VALUES = {
+    0: 0b00000000,
+    1: 0b10010000,
+    2: 0b10100000,
+    3: 0b00010100,
+    4: 0b00100000,
+    5: 0b00100000,
+    6: 0b00000000,
+    7: 0b00110000,
+    # not needed for now
+    16: 0b00100000,
+    17: 0b00010000,
+    18: 0b11111111,
+    19: 0b00000000,
+    20: 0b00011011,
+    21: 0b00000000,
+    22: 0b00000000,
+    23: 0b01001100,
+    24: 0b00100000,
+    25: 0b00000000,
+    26: 0b00000100,
+    27: 0b00000000,
+    28: 0b00000000
+}
+
+current_reg_states = DEFAULT_REG_VALUES.copy()
 
 def find_teensy_port():
     print("[INFO] Automatic detection of the Teensy...")
@@ -74,15 +106,76 @@ def parse_any_base(user_input):
         return None
 
 
-def get_universal_input(prompt_message):
+def get_universal_input(prompt_message, default_value=None):
     while True:
         user_input = input(prompt_message).strip()
+        if not user_input and default_value is not None:
+            return parse_any_base(default_value)
         if not user_input:
             print("[!] Empty input. Try again.")
             continue
         parsed = parse_any_base(user_input)
         if parsed is not None:
             return parsed
+
+
+def format_binary_with_colors(current_val, default_val):
+    bin_current = f"{current_val:08b}"
+    bin_default = f"{default_val:08b}"
+
+    formatted_chars = []
+    for i in range(8):
+        if i == 4:
+            formatted_chars.append(" ")
+
+        if bin_current[i] != bin_default[i]:
+            formatted_chars.append(f"{COLOR_RED}{bin_current[i]}{COLOR_RESET}")
+        else:
+            formatted_chars.append(bin_current[i])
+
+    return "".join(formatted_chars)
+
+
+def process_teensy_output(device, is_read_operation=False):
+    time.sleep(0.15)
+    lines = []
+
+    while device.in_waiting > 0:
+        line = device.readline().decode('utf-8', errors='ignore').strip()
+        if line:
+            if "[i2c write]" in line.lower() or "[i2c read]" in line.lower():
+                continue
+            lines.append(line)
+            if verbose_mode:
+                print(f"  {line}")
+
+    if not verbose_mode:
+        output_str = " ".join(lines).lower()
+
+        if "nack" in output_str or "failed" in output_str:
+            print(f"  -> {COLOR_RED}NACK / FAIL{COLOR_RESET}")
+            return None
+
+        if is_read_operation and "data:" in output_str:
+            parts = output_str.split("data:")
+            if len(parts) > 1:
+                after_data = parts[1].replace(",", " ").replace(";", " ").replace(":", " ").split()
+                for word in after_data:
+                    if word.startswith("0x"):
+                        try:
+                            val_int = int(word, 16)
+                            print(f"  -> ACK | Data read: 0x{val_int:02x} ({val_int:08b})")
+                            return f"0x{val_int:02x}"
+                        except ValueError:
+                            pass
+            print("  -> ACK | Success (No data extracted)")
+            return "0x00"
+
+        else:
+            print("  -> ACK | Success")
+            return "0x00"
+
+    return "0x00"
 
 
 def i2c_write(addr, reg, data):
@@ -106,16 +199,19 @@ def i2c_write(addr, reg, data):
 
     teensy.write(f"w {hex_data}\n".encode('utf-8'))
 
-    read_all_from_teensy(teensy)
+    process_teensy_output(teensy, is_read_operation=False)
 
     reg_int = int(hex_reg, 16)
-    history_registers[reg_int] = (hex_reg, hex_data)
+    data_int = int(hex_data, 16)
 
+    if reg_int in VALID_REGISTERS:
+        current_reg_states[reg_int] = data_int
+        history_registers[reg_int] = (hex_reg, hex_data)
     return True
 
 
 def i2c_read(addr, reg):
-    global teensy
+    global teensy, current_reg_states
     hex_addr = parse_any_base(addr)
     hex_reg = parse_any_base(reg)
 
@@ -123,13 +219,20 @@ def i2c_read(addr, reg):
         print("[!] Read operation failed: invalid parameters.")
         return
 
-    print(f"\n[I2C READ] Chip: {hex_addr} | Reg: {hex_reg}")
+    if verbose_mode:
+        print(f"\n[I2C READ] Chip: {hex_addr} | Reg: {hex_reg}")
 
     teensy.write(f"a {hex_addr}\n".encode('utf-8'))
     time.sleep(0.02)
     teensy.write(f"r {hex_reg}\n".encode('utf-8'))
 
-    read_all_from_teensy(teensy)
+    res = process_teensy_output(teensy, is_read_operation=True)
+
+    if res and res.startswith("0x"):
+        reg_int = int(hex_reg, 16)
+        if reg_int in VALID_REGISTERS:
+            current_reg_states[reg_int] = int(res, 16)
+    return res
 
 def show_write_history():
     print("\n" + "=" * 50)
@@ -154,6 +257,49 @@ def show_write_history():
         print(f"  {hex_reg:<10} | {hex_data}  ({bin_data})")
 
     print("=" * 50)
+
+
+def read_and_display_all_map(chip_addr="0x20"):
+    global verbose_mode
+    print("\n" + "=" * 60)
+    print(f" READING REGISTER MAP FROM CHIP {chip_addr} (Plages 0-7, 16-28)")
+    print("=" * 60)
+
+    old_verbose = verbose_mode
+    verbose_mode = False
+
+    for reg in VALID_REGISTERS:
+        print(f"  Reg {reg:<2} (0x{reg:02x}) : ", end="")
+        sys.stdout.flush()
+        i2c_read(chip_addr, hex(reg))
+        time.sleep(0.02)
+
+    verbose_mode = old_verbose
+    print("=" * 60)
+
+
+def dump_register_map():
+    print("\n" + "=" * 50)
+    print(" d - Dump Formatting")
+    print("=" * 50)
+    print(f"  {'Reg':<10} | {'Data (Binary)':<20}")
+    print("-" * 50)
+
+    for reg in VALID_REGISTERS:
+        current_val = current_reg_states[reg]
+        default_val = DEFAULT_REG_VALUES[reg]
+
+        # Formatage binaire couleur bit à bit
+        binary_str = format_binary_with_colors(current_val, default_val)
+        print(f"  {reg:<10} | {binary_str}")
+    print("=" * 50)
+
+
+def clear_history_and_states():
+    global history_registers, current_reg_states
+    history_registers.clear()
+    current_reg_states = DEFAULT_REG_VALUES.copy()
+    print(f"\n[OK] History cleared. All registers reset to their default values.")
 
 def test_anatest():
     print("\n" + "=" * 50)
@@ -222,53 +368,108 @@ def print_user_menu():
     print("\n" + "=" * 40)
     print("      I2C INTERFACE")
     print("=" * 40)
-    print("  [1] -> Scaning the I2C bus")
-    print("  [2] -> READ a register")
-    print("  [3] -> WRITE in a register")
-    print("  [4] -> OPEN the register map")
-    print("  [5] -> LAUNCH test_anatest()")
-    print("  [6] -> View the HISTORY of written registers")
-    print("  [Q] -> Quit the application")
+    print("  [g] -> Last input")
+    print("  [s] -> Scaning the I2C bus")
+    print("  [v] -> Toggle VERBOSE mode")
+    print("  [r] -> READ a register")
+    print("  [w] -> WRITE in a register")
+    print("  [o] -> OPEN Excel Register Map (GitHub)")
+    print("  [rm]-> READ the REGISTER MAP on the chip")
+    print("  [t] -> LAUNCH test_anatest()")
+    print("  [d] -> DUMP register map")
+    print("  [h] -> View the HISTORY of written registers")
+    print("  [ch]-> CLEAR HISTORY")
+    print("  [q] -> Quit the application")
     print("-" * 40)
 
 
 def main():
-    global teensy
+    global teensy, verbose_mode
     teensy = connect_to_teensy()
     read_all_from_teensy(teensy)
+
+    last_action = {
+        "choice": None,
+        "addr": None,
+        "reg": None,
+        "data": None
+    }
 
     while True:
         print_user_menu()
         choice = input("Choose an action : ").strip().lower()
 
-        if choice == '1':
+        if choice == 'g':
+            if last_action["choice"] is None:
+                print("\n[!] No action has been performed yet during this session.")
+                continue
+
+            prev_choice = last_action["choice"]
+
+            if prev_choice == 'r':
+                print(f"\n[REPEAT] Quick READ -> Chip: {last_action['addr']} | Reg: {last_action['reg']}")
+                i2c_read(last_action["addr"], last_action["reg"])
+                continue
+
+            elif prev_choice == 'w':
+                print(
+                    f"\n[REPEAT] Quick WRITE -> Chip: {last_action['addr']} | Reg: {last_action['reg']} | Data: {last_action['data']}")
+                i2c_write(last_action["addr"], last_action["reg"], last_action["data"])
+                continue
+
+            else:
+                print(f"\n[REPEAT] Re-executing action... (Choice: [{prev_choice}])")
+                choice = prev_choice
+
+        if choice in ['s', 'v', 'r', 'w', 'o', 'rm', 't', 'd', 'h', 'ch']:
+            if choice not in ['r', 'w', 'rm']:
+                last_action["choice"] = choice
+
+        if choice == 's':
             print("\n[Action] Complete Scan of the I2C bus...")
             teensy.write(b's\n')
             read_all_from_teensy(teensy)
 
-        elif choice == '2':
+        elif choice == 'v':
+            verbose_mode = not verbose_mode
+            print(f"\n[INFO] Verbose mode toggled. Now it is {'ON' if verbose_mode else 'OFF'}.")
+
+        elif choice == 'r':
             print("\n--- READING CONFIGURATION ---")
             print("(Accepted formats : Hexa '0x40', Binaire '0b0010', Décimal '64')")
-            addr = get_universal_input("1. Chip address (ex: 0x20) : ")
+            addr = get_universal_input("1. Chip Address (ex: 0x20) [Default: 0x20 - Press Enter]: ", default_value='0x20')
             reg = get_universal_input("2. Register number (ex: 0x02) : ")
+            last_action = {"choice": 'r', "addr": addr, "reg": reg, "data": None}
             i2c_read(addr, reg)
 
-        elif choice == '3':
+        elif choice == 'w':
             print("\n--- WRITING CONFIGURATION ---")
             print("(Accepted formats : Hexa '0x20', Binaire '0b0010', Décimal '64')")
-            addr = get_universal_input("1. Chip Address (ex: 0x20) : ")
+            addr = get_universal_input("1. Chip Address (ex: 0x20) [Default: 0x20 - Press Enter]: ", default_value='0x20')
             reg = get_universal_input("2. Register number (ex: 0x00) : ")
             data = get_universal_input("3. Data value (ex: 0xAB) : ")
+            last_action = {"choice": 'w', "addr": addr, "reg": reg, "data": data}
             i2c_write(addr, reg, data)
 
-        elif choice == '4':
+        elif choice == 'o':
             open_excel_on_github()
 
-        elif choice == '5':
+        elif choice == 'rm':
+            addr = get_universal_input("Chip target [Default: 0x20 - Press Enter]: ", default_value="0x20")
+            read_and_display_all_map(addr)
+            last_action = {"choice": 'rm', "addr": addr, "reg": None, "data": None}
+
+        elif choice == 't':
             test_anatest()
 
-        elif choice == '6':
+        elif choice == 'd':
+            dump_register_map()
+
+        elif choice == 'h':
             show_write_history()
+
+        elif choice == 'ch':
+            clear_history_and_states()
 
         elif choice == 'q':
             print("\nClosing the interface. Session ended.")

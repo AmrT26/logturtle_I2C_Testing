@@ -1,9 +1,10 @@
 import serial
+import serial.tools.list_ports
 import time
 import sys
 import webbrowser
 
-SERIAL_PORT = 'COM4'
+
 BAUD_RATE = 115200
 
 GITHUB_EXCEL_URL = "https://github.com/AmrT26/logturtle_I2C_Testing/blob/main/Reg%20Map.xlsx"
@@ -11,6 +12,42 @@ GITHUB_EXCEL_URL = "https://github.com/AmrT26/logturtle_I2C_Testing/blob/main/Re
 teensy = None
 
 history_registers = {}
+
+
+def find_teensy_port():
+    print("[INFO] Automatic detection of the Teensy...")
+    ports = list(serial.tools.list_ports.comports())
+
+    for p in ports:
+        description = str(p.description).lower()
+        manufacturer = str(p.manufacturer).lower() if p.manufacturer else ""
+
+        if "teensy" in description or "teensy" in manufacturer:
+            print(f"[OK] Teensy detected on port: {p.device} ({p.description})")
+            return p.device
+
+    if ports:
+        print(f"[WARNING] No device explicitly named 'Teensy' found.")
+        print(f"[INFO] Multiple COM ports are active. Please select the correct one:")
+
+        for index, p in enumerate(ports):
+            print(f"  [{index}] -> {p.device} ({p.description})")
+
+        while True:
+            try:
+                choice = input("Enter the number of your Teensy port: ").strip()
+                choice_idx = int(choice)
+                if 0 <= choice_idx < len(ports):
+                    selected_port = ports[choice_idx].device
+                    print(f"[INFO] Using selected port: {selected_port}")
+                    return selected_port
+                else:
+                    print(f"[!] Invalid selection. Choose between 0 and {len(ports) - 1}")
+            except ValueError:
+                print("[!] Please enter a valid number.")
+
+    print("[ERROR] No active COM ports detected. Is the Teensy plugged in?")
+    return None
 
 def parse_any_base(user_input):
     val_str = str(user_input).strip().lower()
@@ -138,14 +175,17 @@ def test_anatest():
     print("=" * 50)
 
 def connect_to_teensy():
+    actual_port = find_teensy_port()
+    if not actual_port:
+        print("[ERROR] Connection impossible : No COM port has been detected.")
     try:
-        print(f"[INFO] Connection to Teensy on {SERIAL_PORT}...")
-        device = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+        print(f"[INFO] Connection to Teensy on {actual_port}...")
+        device = serial.Serial(actual_port, BAUD_RATE, timeout=1)
         time.sleep(2)
         print("[OK] Connected !\n")
         return device
     except serial.SerialException as e:
-        print(f"[ERROR] Impossible to connect to the port {SERIAL_PORT}.")
+        print(f"[ERROR] Impossible to connect to the port {actual_port}.")
         print(f"Détails : {e}")
         sys.exit(1)
 

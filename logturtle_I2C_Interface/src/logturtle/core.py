@@ -136,7 +136,7 @@ def format_binary_with_colors(current_val, default_val):
     return "".join(formatted_chars)
 
 
-def process_teensy_output(device, is_read_operation=False):
+def process_teensy_output(device, is_read_operation=False, silent=False):
     time.sleep(0.15)
     lines = []
 
@@ -164,15 +164,18 @@ def process_teensy_output(device, is_read_operation=False):
                     if word.startswith("0x"):
                         try:
                             val_int = int(word, 16)
-                            print(f"  -> ACK | Data read: 0x{val_int:02x} ({val_int:08b})")
+                            if not silent:
+                                print(f"  -> ACK | Data read: 0x{val_int:02x} ({val_int:08b})")
                             return f"0x{val_int:02x}"
                         except ValueError:
                             pass
-            print("  -> ACK | Success (No data extracted)")
+            if not silent:
+                print("  -> ACK | Success (No data extracted)")
             return "0x00"
 
         else:
-            print("  -> ACK | Success")
+            if not silent:
+                print("  -> ACK | Success")
             return "0x00"
 
     return "0x00"
@@ -210,7 +213,7 @@ def i2c_write(addr, reg, data):
     return True
 
 
-def i2c_read(addr, reg):
+def i2c_read(addr, reg, silent=False):
     global teensy, current_reg_states
     hex_addr = parse_any_base(addr)
     hex_reg = parse_any_base(reg)
@@ -226,7 +229,13 @@ def i2c_read(addr, reg):
     time.sleep(0.02)
     teensy.write(f"r {hex_reg}\n".encode('utf-8'))
 
-    res = process_teensy_output(teensy, is_read_operation=True)
+    old_verbose = verbose_mode
+    if silent:
+        globals()['verbose_mode'] = False
+
+    res = process_teensy_output(teensy, is_read_operation=True, silent=silent)
+
+    globals()['verbose_mode'] = old_verbose
 
     if res and res.startswith("0x"):
         reg_int = int(hex_reg, 16)
@@ -260,39 +269,34 @@ def show_write_history():
 
 
 def read_and_display_all_map(chip_addr="0x20"):
-    global verbose_mode
-    print("\n" + "=" * 60)
-    print(f" READING REGISTER MAP FROM CHIP {chip_addr} (Plages 0-7, 16-28)")
-    print("=" * 60)
+    global verbose_mode, current_reg_states
+    print("\n" + "=" * 40)
+    print(f" REGISTER MAP - CHIP {chip_addr}")
+    print(" (Red bits = modified)")
+    print("=" * 40)
 
     old_verbose = verbose_mode
     verbose_mode = False
 
     for reg in VALID_REGISTERS:
-        print(f"  Reg {reg:<2} (0x{reg:02x}) : ", end="")
-        sys.stdout.flush()
-        i2c_read(chip_addr, hex(reg))
+        res = i2c_read(chip_addr, hex(reg), silent=True)
         time.sleep(0.02)
 
+        reg_label = f"  Reg {reg:<2} (0x{reg:02x})"
+
+        if res and res.startswith("0x"):
+            current_val = current_reg_states[reg]
+            default_val = DEFAULT_REG_VALUES[reg]
+
+            binary_str = format_binary_with_colors(current_val, default_val)
+            data_str = f"{binary_str} ({res})"
+        else:
+            data_str = f"{COLOR_RED}NACK / FAIL{COLOR_RESET}"
+
+        print(f"{reg_label} : {data_str}")
+
     verbose_mode = old_verbose
-    print("=" * 60)
-
-
-def dump_register_map():
-    print("\n" + "=" * 50)
-    print(" d - Dump Formatting")
-    print("=" * 50)
-    print(f"  {'Reg':<10} | {'Data (Binary)':<20}")
-    print("-" * 50)
-
-    for reg in VALID_REGISTERS:
-        current_val = current_reg_states[reg]
-        default_val = DEFAULT_REG_VALUES[reg]
-
-        # Formatage binaire couleur bit à bit
-        binary_str = format_binary_with_colors(current_val, default_val)
-        print(f"  {reg:<10} | {binary_str}")
-    print("=" * 50)
+    print("=" * 40)
 
 
 def clear_history_and_states():
@@ -374,9 +378,8 @@ def print_user_menu():
     print("  [r] -> READ a register")
     print("  [w] -> WRITE in a register")
     print("  [o] -> OPEN Excel Register Map (GitHub)")
-    print("  [rm]-> READ the REGISTER MAP on the chip")
+    print("  [rm]-> READ and DUMP the REGISTER MAP on the chip")
     print("  [t] -> LAUNCH test_anatest()")
-    print("  [d] -> DUMP register map")
     print("  [h] -> View the HISTORY of written registers")
     print("  [ch]-> CLEAR HISTORY")
     print("  [q] -> Quit the application")
@@ -421,7 +424,7 @@ def main():
                 print(f"\n[REPEAT] Re-executing action... (Choice: [{prev_choice}])")
                 choice = prev_choice
 
-        if choice in ['s', 'v', 'r', 'w', 'o', 'rm', 't', 'd', 'h', 'ch']:
+        if choice in ['s', 'v', 'r', 'w', 'o', 'rm', 't', 'h', 'ch']:
             if choice not in ['r', 'w', 'rm']:
                 last_action["choice"] = choice
 
@@ -461,9 +464,6 @@ def main():
 
         elif choice == 't':
             test_anatest()
-
-        elif choice == 'd':
-            dump_register_map()
 
         elif choice == 'h':
             show_write_history()

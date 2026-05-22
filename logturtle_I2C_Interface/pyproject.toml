@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "logturtle"
+version = "0.1.0"
+description = "I2C control interface via Teensy 4.1"
+readme = "README.md"
+authors = [
+    { name = "Amr Taouis", email = "amr.taouis@tyndall.ie" }
+]
+dependencies = [
+    "pyserial>=3.5",
+    "requests>=2.31.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

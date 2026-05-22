@@ -8,9 +8,11 @@
 
 const int SDA_PIN = 18;
 const int SCL_PIN = 19;
+const int ADC_PIN = 14; // Pin 14 Teensy 4.1
+const int PIN_TEST = 12;
 const int HALF_PERIOD_US = 250; // 2kHz
 
-byte current_address = 0x40;
+byte current_address = 0x20;
 byte current_reg     = 0x00;
 byte current_data    = 0xAB;
 
@@ -61,6 +63,12 @@ int read_sda() {
 void scl_high() {
   pinMode(SCL_PIN, INPUT);
   delayMicroseconds(HALF_PERIOD_US);
+}
+
+// New version of scl_high() without delay
+void scl_high_no_delay() {
+  pinMode(SCL_PIN, INPUT);
+  // No delay here
 }
 
 void scl_low() {
@@ -140,6 +148,7 @@ void i2c_write_bit(int bit) {
 // READ A BIT (ACK/NACK)
 // ============================================
 
+/*
 int i2c_read_bit() {
   scl_low();
   sda_high(); // release SDA (chip can write)
@@ -153,6 +162,43 @@ int i2c_read_bit() {
   scl_low();
   return bit;
 }
+*/
+
+int read_adc() {
+  const int THRESHOLD_HIGH = 520; // 10 bits resolution here
+  //pinMode(PIN_TEST, OUTPUT);
+  digitalWrite(PIN_TEST, HIGH);
+  int raw = analogRead(ADC_PIN);
+  digitalWrite(PIN_TEST, LOW);
+  Serial.print("ADC raw: ");
+  Serial.println(raw);
+  if(raw > THRESHOLD_HIGH) {
+    return 0; // chip sees LOW
+  } else {
+    return 1; // chip sees HIGH
+  }
+}
+
+
+
+int i2c_read_adc() {
+  scl_low();
+  sda_high(); // release SDA (chip can write)
+  delayMicroseconds(50); // Small delay for SDA to settle
+
+  scl_high_no_delay(); // chip writes on SDA (no internal delay)
+
+  delayMicroseconds(50); // Short delay for ACK to settle on SDA
+
+  // read_sda() handles the inversion
+  int bit = read_adc(); 
+
+  delayMicroseconds(HALF_PERIOD_US - 50); // Complete the full clock period
+
+  scl_low();
+  return bit;
+}
+
 
 // ============================================
 // WRITE A BYTE
@@ -178,7 +224,7 @@ void i2c_write_byte(byte data) {
 byte i2c_read_byte() {
   byte data = 0;
   for(int i = 7; i >= 0; i--) {
-    int bit = i2c_read_bit();
+    int bit = i2c_read_adc();
     data |= (bit << i);
   }
   return data;
@@ -189,7 +235,9 @@ byte i2c_read_byte() {
 // ============================================
 
 bool i2c_read_ack() {
-  int ack = i2c_read_bit();
+  int ack = i2c_read_adc();
+  Serial.print("  raw ack bit: ");
+  Serial.println(ack);
   if(ack == 0) {
     Serial.println("  → ACK");
     return true;

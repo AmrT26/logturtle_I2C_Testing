@@ -1,0 +1,8 @@
+# Reg 0: enable all encluding irefvref_En
+0, ff
+# Enable vcmbuf and adcvrefbufs
+1,10010011
+# Reg 24   - Enable Bgap
+24, 0010 0001
+#Reg 3  - AnaTest Bus out cfg
+3, 00110100

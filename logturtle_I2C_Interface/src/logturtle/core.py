@@ -474,6 +474,55 @@ def test_anatest():
     print(" END OF AUTOMATIC TEST")
     print("=" * 50)
 
+def test_adctest():
+    print("\n" + "=" * 50)
+    print(" ADC Test Setup")
+    print("=" * 50)
+    
+    # i2c_adc_en	i2c_pga2_en	i2c_lna2_en	i2c_adcbufn_en	i2c_adcbufp_en	i2c_pga1_en	i2c_lna1_en	i2c_irefvref_en
+    # 1	            0	        0	        1	            1	            0	        0	        1
+
+    i2c_write(0, "10011001")
+    time.sleep(0.1)
+    i2c_read(0)  # verification
+
+    # dig_PGA2_gain_ctrl[2]	dig_PGA2_gain_ctrl[1]	dig_PGA2_gain_ctrl[0]	dig_PGA1_gain_ctrl[2]	dig_PGA1_gain_ctrl[1]	dig_PGA1_gain_ctrl[0]	i2c_vcmbuf_en	i2c_adcvrefbufs_en
+    # 0	                    0	                    0	                    0	                    0	                    0	                    1	            1
+
+    i2c_write(1, "00000011")
+    time.sleep(0.1)
+    i2c_read(1)  # verification
+
+    # dig_ADC_Cbalast_code_P[4]	dig_ADC_Cbalast_code_P[3]	dig_ADC_Cbalast_code_P[2]	dig_ADC_Cbalast_code_P[1]	dig_ADC_Cbalast_code_P[0]	i2c_adc_rstb	dig_ADC_mode_sel[1]	dig_ADC_mode_sel[0]
+    # 1	                        0	                        1	                        0	                        0	                        0	            1	                0
+    # set ADC mode, and pull rstb high
+    i2c_write(2, "10100110")
+    time.sleep(0.1)
+    i2c_read(2)  # verification
+
+    # set ADC mode, and pull rstb low
+    i2c_write(2, "10100010")
+    time.sleep(0.1)
+    i2c_read(2)  # verification
+
+    # — —   —	—	i2c_sel_adc_vcm_mux_ips	dig_en_ADC_comp_outputs	dig_ADC_Buf_swap_override	dig_ADC_Buf_swap_override_en
+    # 0 0	  0	0	0	                    1	                    0	                        0
+
+    i2c_write(6, "00000100")
+    time.sleep(0.1)
+    i2c_read(6)  # verification
+
+    # —	—	ADC_CLKSelect_25kHz	ADC_CLKSelect_51kHz	ADC_CLKSelect_102kHz	dig_ChoppingCLK_Select_102kHz	dig_EN_Bypass_DLL_Filter	dig_EN_Bypass_PLL_Filter
+    # 0	0	0	                1	                0	                    0	                            0	                        0
+    
+    i2c_write(17, "00001000")
+    time.sleep(0.1)
+    i2c_read(17)  # verification
+
+    print("\n" + "=" * 50)
+    print(" END OF ADC SETUP")
+    print("=" * 50)
+
 
 def connect_to_teensy():
     actual_port = find_teensy_port()

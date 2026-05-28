@@ -174,7 +174,7 @@ int i2c_read_bit() {
 */
 
 int read_adc() {
-  const int THRESHOLD_HIGH = 340; // 10 bits resolution here
+  const int THRESHOLD_HIGH = 340;
   //pinMode(PIN_TEST, OUTPUT);
   digitalWrite(PIN_TEST, HIGH);
   int raw = analogRead(ADC_PIN);

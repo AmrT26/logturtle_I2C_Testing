@@ -65,10 +65,10 @@ def smart_input(prompt):
                     history_index = -1
 
                 chosen_command = session_history[history_index]
-                print(f"[Rappel] -> {chosen_command}")
+                print(f"[Recall] -> {chosen_command}")
                 return chosen_command
             else:
-                print("[!] Aucun historique disponible.")
+                print("[!] No history available.")
                 return ""
 
         if user_input:

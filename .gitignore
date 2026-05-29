@@ -1,3 +1,4 @@
 .vscode/settings.json
 .pio/build/project.checksum
 /ADC
+raw_signals_capture.csv

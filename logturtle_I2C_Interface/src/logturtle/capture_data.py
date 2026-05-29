@@ -14,10 +14,6 @@ elif sys.platform.startswith("darwin"):
 else:
     dwf = ctypes.cdll.LoadLibrary("libdwf.so")
 
-# --- CUSTOM PROTOCOL CONFIGURATION Constants ---
-TIME_TO_FIRST_PULSE_NS = 1170
-DELAYS_NS = [400, 430, 460, 460, 470, 480, 475, 480, 510, 510, 475] # 11 transitions for 12 bits
-
 def save_raw_signals_to_csv(raw_samples, sample_period_ns, filename="raw_signals_capture.csv"):
     print(f"Exporting raw signals to {filename}...")
     try:
@@ -128,82 +124,6 @@ def capture_data(duration_sec=1.0, SR=100000000.0, plot=False, save=False, csv_f
     
     if save_raw and raw_samples:
         save_raw_signals_to_csv(raw_samples, sample_period_ns, filename=raw_filename)
-
-    # # --- Custom Protocol Processing Phase ---
-    # print("Processing digital signals and parsing frames...")
-    # decoded_values = []
-    # pClock = 0
-    # total_len = len(raw_samples)
-    
-    # for i in range(total_len):
-    #     sample = raw_samples[i]
-    #     clockState = (sample >> 2) & 1  # DIO 2
-        
-    #     # Detect Rising Edge on DIO 4
-    #     if clockState == 1 and pClock == 0:
-    #         word_dio6 = 0
-    #         is_frame_valid = True
-    #         current_offset_ns = TIME_TO_FIRST_PULSE_NS
-            
-    #         for bitIdx in range(12):
-    #             if bitIdx > 0:
-    #                 current_offset_ns += DELAYS_NS[bitIdx - 1]
-                
-    #             # Turn absolute elapsed time offset into strict indexing reference
-    #             target_index = i + int(round(current_offset_ns / sample_period_ns))
-                
-    #             if target_index < total_len:
-    #                 target_sample = raw_samples[target_index]
-    #                 bit6 = (target_sample >> 0) & 1  # DIO 0 Data
-    #                 bit7 = (target_sample >> 1) & 1  # DIO 1 Complement
-                    
-    #                 # Protocol Verification Step (XOR Check)
-    #                 if (bit6 ^ bit7) != 1:
-    #                     is_frame_valid = False
-    #                     break
-                    
-    #                 # Shift bit into local reconstructed value variable (MSB first)
-    #                 word_dio6 = (word_dio6 << 1) | bit6
-    #             else:
-    #                 is_frame_valid = False
-    #                 break
-            
-    #         # If the differential check passes completely, commit the value
-    #         if is_frame_valid:
-    #             decoded_values.append(word_dio6)
-                
-    #     pClock = clockState
-
-    # print(f"Parsing done! Found {len(decoded_values)} valid 12-bit frames.")
-
-    # # --- CSV File Export Generation ---
-    # if save and decoded_values:
-    #     print(f"Exporting results to {csv_filename}...")
-    #     with open(csv_filename, mode='w', newline='') as csv_file:
-    #         writer = csv.writer(csv_file)
-    #         # Layout matching requested structure:
-    #         # Column 1 = Decimal values, Column 2 = Serial index count
-    #         writer.writerow(["DIO6_Value_Decimal", "Index"])
-    #         for idx, val in enumerate(decoded_values):
-    #             writer.writerow([val, idx])
-    #     print("CSV export complete.")
-
-    # # --- Graphical Waveform Rendering ---
-    # if plot and decoded_values:
-    #     if len(decoded_values) == 0:
-    #         print("No valid decoded data available to generate plot layout.")
-    #         return
-    #     plt.figure(figsize=(10, 5))
-    #     plt.step(range(len(decoded_values)), decoded_values, where='mid', color='b', label='DIO6 Value')
-    #     plt.title('Decoded Parallel Bus Data Over Time (Decimal)')
-    #     plt.xlabel('Frame Serial Index')
-    #     plt.ylabel('Value (12-bit Decimal Integer)')
-    #     plt.grid(True, linestyle='--')
-    #     plt.legend()
-    #     plt.show()
-
-
-    # return decoded_values
 
 
 # --- Execution Entry Point ---

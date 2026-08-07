@@ -1,0 +1,8 @@
+# Reg 0: enable lna2, pga2, adc
+0, 1111 1001
+1, 1001 0011
+2, 1010 0001
+2, 1010 0101
+6, 0000 0100
+# Reg 17: enable chopping clock
+17, 0001 0100

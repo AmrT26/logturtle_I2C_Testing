@@ -54,34 +54,10 @@ current_reg_states = DEFAULT_REG_VALUES.copy()
 
 
 def smart_input(prompt):
-    global session_history, history_index
     try:
-        user_input = input(prompt).strip()
-
-        if user_input.lower() == 'z':
-            if session_history:
-                history_index -= 1
-                if history_index < -len(session_history):
-                    history_index = -1
-
-                chosen_command = session_history[history_index]
-                print(f"[Recall] -> {chosen_command}")
-                return chosen_command
-            else:
-                print("[!] No history available.")
-                return ""
-
-        if user_input:
-            if not session_history or session_history[-1] != user_input:
-                session_history.append(user_input)
-            history_index = 0
-
-        return user_input
-
+        return input(prompt)
     except KeyboardInterrupt:
         print("\n[!] Interrupted.")
-        return ""
-    except EOFError:
         return ""
 
 
@@ -275,7 +251,7 @@ def i2c_write(reg, data, max_retries=3, retry_delay=0.05):
     return False
 
 
-def i2c_read(reg, silent=False, max_retries=5, retry_delay=0.05):
+def i2c_read(reg, silent=False, max_retries=10, retry_delay=0.05):
     global teensy, current_reg_states
     hex_addr = "0x20"
     hex_reg = parse_any_base(reg)
@@ -400,12 +376,12 @@ def execute_test_file(test_number):
                 filename = file_in_dir
                 break
     except Exception as e:
-        print(f"[ERROR] Impossible de scanner le dossier : {e}")
+        print(f"[ERROR] Unable to scan the current directory : {e}")
         return
 
     if not filename:
-        print(f"\n[ERROR] Aucun fichier trouvé commençant par '{prefix}' et finissant par '.txt'.")
-        print("Vérifie que ton fichier est bien présent dans le répertoire courant.")
+        print(f"\n[ERROR] No file found starting with '{prefix}' and ending with '.txt'.")
+        print("Please ensure your test file is present in the current working directory.")
         return
 
     print("\n" + "=" * 50)
@@ -474,55 +450,6 @@ def test_anatest():
     print(" END OF AUTOMATIC TEST")
     print("=" * 50)
 
-def test_adctest():
-    print("\n" + "=" * 50)
-    print(" ADC Test Setup")
-    print("=" * 50)
-    
-    # i2c_adc_en	i2c_pga2_en	i2c_lna2_en	i2c_adcbufn_en	i2c_adcbufp_en	i2c_pga1_en	i2c_lna1_en	i2c_irefvref_en
-    # 1	            0	        0	        1	            1	            0	        0	        1
-
-    i2c_write(0, "10011001")
-    time.sleep(0.1)
-    i2c_read(0)  # verification
-
-    # dig_PGA2_gain_ctrl[2]	dig_PGA2_gain_ctrl[1]	dig_PGA2_gain_ctrl[0]	dig_PGA1_gain_ctrl[2]	dig_PGA1_gain_ctrl[1]	dig_PGA1_gain_ctrl[0]	i2c_vcmbuf_en	i2c_adcvrefbufs_en
-    # 0	                    0	                    0	                    0	                    0	                    0	                    1	            1
-
-    i2c_write(1, "00000011")
-    time.sleep(0.1)
-    i2c_read(1)  # verification
-
-    # dig_ADC_Cbalast_code_P[4]	dig_ADC_Cbalast_code_P[3]	dig_ADC_Cbalast_code_P[2]	dig_ADC_Cbalast_code_P[1]	dig_ADC_Cbalast_code_P[0]	i2c_adc_rstb	dig_ADC_mode_sel[1]	dig_ADC_mode_sel[0]
-    # 1	                        0	                        1	                        0	                        0	                        0	            1	                0
-    # set ADC mode, and pull rstb high
-    i2c_write(2, "10100110")
-    time.sleep(0.1)
-    i2c_read(2)  # verification
-
-    # set ADC mode, and pull rstb low
-    i2c_write(2, "10100010")
-    time.sleep(0.1)
-    i2c_read(2)  # verification
-
-    # — —   —	—	i2c_sel_adc_vcm_mux_ips	dig_en_ADC_comp_outputs	dig_ADC_Buf_swap_override	dig_ADC_Buf_swap_override_en
-    # 0 0	  0	0	0	                    1	                    0	                        0
-
-    i2c_write(6, "00000100")
-    time.sleep(0.1)
-    i2c_read(6)  # verification
-
-    # —	—	ADC_CLKSelect_25kHz	ADC_CLKSelect_51kHz	ADC_CLKSelect_102kHz	dig_ChoppingCLK_Select_102kHz	dig_EN_Bypass_DLL_Filter	dig_EN_Bypass_PLL_Filter
-    # 0	0	0	                1	                0	                    0	                            0	                        0
-    
-    i2c_write(17, "00001000")
-    time.sleep(0.1)
-    i2c_read(17)  # verification
-
-    print("\n" + "=" * 50)
-    print(" END OF ADC SETUP")
-    print("=" * 50)
-
 
 def connect_to_teensy():
     actual_port = find_teensy_port()
@@ -573,12 +500,11 @@ def print_user_menu():
     print("      I2C INTERFACE")
     print("=" * 40)
     print("  [m] -> Show this MENU")
-    print("  [z] -> Type 'z' + Enter to recall PREVIOUS command")
     print("  [g] -> Last input")
     print("  [s] -> Scaning the I2C bus")
     print("  [v] -> Toggle VERBOSE mode")
-    print("  [r] -> READ a register")
-    print("  [w] -> WRITE in a register")
+    print("  [r 0x03] -> READ a register")
+    print("  [w 0x03 0xAB] -> WRITE in a register")
     print("  [a] -> Set analog test mux (anatest)")
     print("  [o] -> OPEN Excel Register Map (GitHub)")
     print("  [rm]-> READ and DUMP the REGISTER MAP on the chip")
@@ -674,7 +600,7 @@ def main():
 
         if choice == 'g':
             if last_action["choice"] is None:
-                print("\n[!] No action has been performed yet during this session.")
+                print("\n[!] No action has been performed yet.")
                 continue
 
             prev_choice = last_action["choice"]
@@ -685,8 +611,7 @@ def main():
                 continue
 
             elif prev_choice == 'w':
-                print(
-                    f"\n[REPEAT] Quick WRITE -> Chip: Reg: {last_action['reg']} | Data: {last_action['data']}")
+                print(f"\n[REPEAT] Quick WRITE -> Chip: Reg: {last_action['reg']} | Data: {last_action['data']}")
                 i2c_write(last_action["reg"], last_action["data"])
                 continue
 
@@ -708,19 +633,44 @@ def main():
             print(f"\n[INFO] Verbose mode toggled. Now it is {'ON' if verbose_mode else 'OFF'}.")
 
         elif choice == 'r':
-            print("\n--- READING CONFIGURATION ---")
-            print("(Accepted formats : Hexa '0x40', Binaire '0b0010', Décimal '64')")
-            reg = get_universal_input("2. Register number (ex: 0x02) : ")
-            last_action = {"choice": 'r', "reg": reg, "data": None}
-            i2c_read(reg)
+            if len(parts) > 1:
+                reg = parse_any_base(parts[1])
+                if reg:
+                    last_action = {"choice": 'r', "reg": reg, "data": None}
+                    i2c_read(reg)
+                else:
+                    print("[!] Invalid register format.")
+            else:
+                print("\n--- READ ---")
+                reg = get_universal_input("Register (ex: 0x03) : ")
+                last_action = {"choice": 'r', "reg": reg, "data": None}
+                i2c_read(reg)
 
         elif choice == 'w':
-            print("\n--- WRITING CONFIGURATION ---")
-            print("(Accepted formats : Hexa '0x20', Binaire '0b0010', Décimal '64')")
-            reg = get_universal_input("2. Register number (ex: 0x00) : ")
-            data = get_universal_input("3. Data value (ex: 0xAB) : ")
-            last_action = {"choice": 'w', "reg": reg, "data": data}
-            i2c_write(reg, data)
+            if len(parts) == 3:
+                reg = parse_any_base(parts[1])
+                data = parse_any_base(parts[2])
+                if reg and data:
+                    last_action = {"choice": 'w', "reg": reg, "data": data}
+                    i2c_write(reg, data)
+                else:
+                    print("[!] Invalid format.")
+                    print("    Usage: w 0x03 0xAB")
+            elif len(parts) == 2:
+                reg = parse_any_base(parts[1])
+                if reg:
+                    data = get_universal_input(f"Data for reg {parts[1]} : ")
+                    last_action = {"choice": 'w', "reg": reg, "data": data}
+                    i2c_write(reg, data)
+                else:
+                    print("[!] Invalid register format.")
+                    print("    Usage: w 0x03 0xAB")
+            else:
+                print("\n--- WRITE ---")
+                reg = get_universal_input("Register (ex: 0x03) : ")
+                data = get_universal_input(f"Data (ex: 0xAB) : ")
+                last_action = {"choice": 'w', "reg": reg, "data": data}
+                i2c_write(reg, data)
 
         elif choice == 'a':
             execute_anatest_menu()

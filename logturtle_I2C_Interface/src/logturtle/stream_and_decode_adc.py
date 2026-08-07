@@ -141,12 +141,12 @@ def decode_differential_edges(input_file, output_file):
         print("Error: The CSV must contain at least three columns.")
         return
 
-    # 2. Filter artefacts
+    # 2. Filter artefacts de glitching
     clean_signal = medfilt(differential_signal, kernel_size=5)
 
     # 3. Edge Detection Logic
-    positive_active = (clean_signal > 0.5).astype(int)
-    negative_active = (clean_signal < -0.5).astype(int)
+    positive_active = (clean_signal > 0.8).astype(int)
+    negative_active = (clean_signal < -0.8).astype(int)
 
     pos_transitions = np.where(np.diff(positive_active) == 1)[0] + 1
     neg_transitions = np.where(np.diff(negative_active) == 1)[0] + 1
@@ -156,7 +156,11 @@ def decode_differential_edges(input_file, output_file):
     times_neg = time_data[neg_transitions]
 
     combined_times = np.concatenate((times_pos, times_neg))
-    
+
+    print(f"[DEBUG] Number of positive transitions detected : {len(pos_transitions)}")
+    print(f"[DEBUG] Number of negative transitions detected : {len(neg_transitions)}")
+    print(f"[DEBUG] Total of combined pulses : {len(combined_times)}")
+
     # Store as tri-level data: 1s for positive, -1s for negative
     combined_data = np.concatenate((np.ones(len(times_pos), dtype=int), 
                                     -np.ones(len(times_neg), dtype=int)))
@@ -169,7 +173,7 @@ def decode_differential_edges(input_file, output_file):
     # 5. Group pulses into trains
     # Set threshold to 15us to ignore the 5us inter-pulse spacing 
     # and only split on the ~20us train gaps.
-    gap_threshold = 5e3 
+    gap_threshold = 5e3
     
     trains = []
     current_train = []
@@ -200,10 +204,14 @@ def decode_differential_edges(input_file, output_file):
             # Join bits into a string and convert from base-2 to base-10
             bit_string = "".join(str(b) for b in binary_train)
             print(bit_string)
-            decimals.append(int(bit_string, 2))
+            decimals.append(int(bit_string,2))
         else:
             print(f"Artefact Warning: Train {index} contains {len(train)} pulses. Expected 12.")
-            decimals.append(np.nan) 
+            decimals.append(np.nan)
+
+
+    for index, train in enumerate(trains):
+        print(f"Train {index}: {len(train)} pulses")
 
     # 7. Output results
     output_df = pd.DataFrame({'Decoded_Decimal': decimals})
@@ -225,8 +233,8 @@ if __name__ == "__main__":
     # 1. Execute hardware capture
     print("--- Starting Data Capture ---")
     capture_success = capture_data(
-        duration_sec=0.025, 
-        SR=50000000.0, 
+        duration_sec=0.025,
+        SR=50000000.0,
         save_raw=True,
         raw_filename=RAW_CSV_FILENAME
     )
